@@ -79,6 +79,7 @@ def inventory(path):
                     rows.append(row)
             notes_frame = slide.notes_slide.notes_text_frame if slide.has_notes_slide else None
             slides.append({"slide": index, "part": part, "layout": str(layout.part.partname).lstrip("/"), "master": master_part,
+                           "shown_in_normal_sequence": slide._element.get("show") not in ("0", "false"),
                            "theme": theme, "shapes": shapes,
                            "notes": notes_frame.text if notes_frame is not None else "",
                            "notes_body_present": notes_frame is not None})
@@ -91,12 +92,45 @@ def inventory(path):
                 "embedded_files": sorted(n for n in names if n.startswith("ppt/embeddings/"))}
 
 
+def compare_migration(start, actual, plan):
+    source = start["slides"]
+    order = [page["source_slide"] for page in plan["slides"]]
+    if sorted(order) != list(range(1, len(source) + 1)):
+        raise ValueError("plan must account for every source slide exactly once")
+    findings = []
+    if len(actual["slides"]) != len(order):
+        findings.append({"kind": "slide_count_changed", "expected": len(order), "actual": len(actual["slides"])})
+    for page, output in zip(plan["slides"], actual["slides"]):
+        original = source[page["source_slide"] - 1]
+        ref = {"source_slide": original["slide"], "output_slide": output["slide"]}
+        if original["shown_in_normal_sequence"] != output["shown_in_normal_sequence"]:
+            findings.append({"kind": "slide_visibility_changed", **ref,
+                             "expected_shown": original["shown_in_normal_sequence"],
+                             "actual_shown": output["shown_in_normal_sequence"]})
+        if (original["notes_body_present"], original["notes"]) != (output["notes_body_present"], output["notes"]):
+            findings.append({"kind": "speaker_notes_changed", **ref})
+        shapes = {shape["id"]: shape for shape in original["shapes"]}
+        slots = {shape["placeholder"]["idx"]: shape for shape in output["shapes"] if "placeholder" in shape}
+        for entry in page["slots"]:
+            shape = shapes[entry["shape"]]
+            slot = slots.get(entry["idx"], {})
+            field = {"text": "text", "chart": "series"}[shape["kind"]]
+            if shape[field] != slot.get(field):
+                findings.append({"kind": "mapped_content_changed", **ref,
+                                 "source_shape": shape["id"], "target_slot": entry["idx"]})
+    return findings
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["inspect", "check"])
     parser.add_argument("template", type=Path)
     parser.add_argument("output", type=Path, nargs="?")
+    parser.add_argument("--source", type=Path, help="starting deck for a one-to-one migration")
+    parser.add_argument("--plan", type=Path, help="reviewed input plan with slides in intended output order")
     args = parser.parse_args()
+    if bool(args.source) != bool(args.plan) or (args.source and args.mode != "check"):
+        parser.error("--source and --plan are used together in check mode")
     original = inventory(args.template)
     if args.mode == "inspect":
         print(json.dumps(original, ensure_ascii=True, indent=2))
@@ -129,6 +163,19 @@ def main():
               "output_sha256": actual["sha256"], "protected_part_count": len(original["protected_parts"]),
               "changed_parts": changed, "findings": findings, "slides": actual["slides"],
               "scope": "Package lineage and native-object inventory only; human visual/scientific review still required."}
+    if args.source:
+        start = inventory(args.source)
+        try:
+            plan = json.loads(args.plan.read_text(encoding="utf-8"))
+            findings.extend(compare_migration(start, actual, plan))
+        except (ValueError, TypeError, KeyError) as error:
+            parser.error(f"invalid or unsupported migration plan: {error}")
+        result.update(source_sha256=start["sha256"],
+                      plan_sha256=hashlib.sha256(args.plan.read_bytes()).hexdigest(),
+                      expected_visible_source_order=[p["source_slide"] for p in plan["slides"]
+                                                     if start["slides"][p["source_slide"]-1]["shown_in_normal_sequence"]],
+                      visible_output_slides=[s["slide"] for s in actual["slides"] if s["shown_in_normal_sequence"]],
+                      scope="Template lineage and mapped slide content, normal show visibility and speaker-note body text.")
     print(json.dumps(result, ensure_ascii=True, indent=2))
     raise SystemExit(bool(findings))
 

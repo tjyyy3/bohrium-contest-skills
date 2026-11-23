@@ -21,7 +21,7 @@ Run the helper from its installed folder.
 python template_audit.py inspect /input/template.pptx > /app/work/template.json
 python template_audit.py inspect /input/start.pptx > /app/work/start.json
 python migrate.py /input/start.pptx /input/template.pptx /app/work/plan.json /app/output/presentation.pptx /app/work/migration.json
-python template_audit.py check /input/template.pptx /app/output/presentation.pptx > /app/work/package-check.json
+python template_audit.py check /input/template.pptx /app/output/presentation.pptx --source /input/start.pptx --plan /app/work/plan.json > /app/work/package-check.json
 ```
 
 Return the actual case's required keys and files. An example partial explanation is "PPTX and source mapping saved; PDF export unavailable in this environment." This statement is only appropriate when that condition actually occurred. Do not copy a success flag from an example.

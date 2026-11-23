@@ -1,0 +1,8 @@
+# Upstream attribution
+
+This package adapts presentation workflow guidance from the pinned skills below. The workflow and materials-science profile are written for this task. They do not bundle upstream generators, images, templates or dependencies. The skill works without fetching these repositories at runtime.
+
+- **EvoScientist/EvoSkills**, `skills/academic-slides` and its `slide-design`, `talk-structure` and `slide-creation` references, commit `4889c2270af5f9a7658bb6a6709bf37040902006`. Adapted the problem-driven talk sequence, one primary idea and visual per page, consistent alignment, and the rendered review loop. The stage and page-count suggestions were replaced by case constraints. [Source](https://github.com/EvoScientist/EvoSkills/tree/4889c2270af5f9a7658bb6a6709bf37040902006/skills/academic-slides) · [Apache-2.0 license](../licenses/evoscientist.txt)
+- **Anthropic**, `anthropics/skills/skills/pptx`, commit `2c5958ecac7cee2b583967a2c4981d0f4a75c579`. Adapted native chart data and labels, restrained axes and gridlines, saved-package checks and rendered inspection. Runtime uses the available tools and the case's template requirements. [Source](https://github.com/anthropics/skills/tree/2c5958ecac7cee2b583967a2c4981d0f4a75c579/skills/pptx) · [Apache-2.0 license](../licenses/anthropic-pptx.txt)
+
+K-Dense Scientific Agent Skills' `scientific-slides` was reviewed in source selection at commit `2d2065fb4520fa3f3f2bcf61cff26ec8b7eba4b5`. No part of that workflow is bundled. [Source](https://github.com/K-Dense-AI/scientific-agent-skills/tree/2d2065fb4520fa3f3f2bcf61cff26ec8b7eba4b5)

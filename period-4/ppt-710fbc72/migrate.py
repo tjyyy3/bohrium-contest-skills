@@ -85,6 +85,9 @@ def migrate(args):
     for page_no, page in enumerate(pages, 1):
         src = source.slides[page["source_slide"] - 1]
         slide = out.slides.add_slide(layouts[page["layout"].lstrip("/")])
+        show = src._element.get("show")
+        if show is not None:
+            slide._element.set("show", show)
         shapes = {s.shape_id: s for s in src.shapes}
         items = page["slots"]
         if sorted(i["shape"] for i in items) != sorted(shapes):
@@ -118,6 +121,7 @@ def migrate(args):
                 raise ValueError(f"slide {page_no}: target has no notes body")
             paragraphs(notes, destination, False)
         records.append({"output_slide": page_no, "source_slide": page["source_slide"],
+                        "shown_in_normal_sequence": show not in ("0", "false"),
                         "layout": page["layout"], "slots": mapped, "notes_body_copied": notes is not None})
     args.deck.parent.mkdir(parents=True, exist_ok=True)
     args.map.parent.mkdir(parents=True, exist_ok=True)
