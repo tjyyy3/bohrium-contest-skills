@@ -1,0 +1,50 @@
+---
+name: adapt-academic-template
+description: Adapt an academic presentation to a supplied PowerPoint template while retaining actual master/layout inheritance, editable evidence, and page-level source mappings. Use for template or formatting adaptation of research slides.
+---
+
+# Adapt research slides to the actual template
+
+Read `/input/case.json`, `task.md`, and `environment/resources.yaml` first. Preserve the exact case ID, output names and every original `output_contract` field. Use `/app/work` for intermediate work and `/app/output` for deliverables. Resources beside this file are relative to the installed Skill directory, normally `/skills/weekly-skill`. The included example is an interface illustration, not a source of scientific facts or a prepared answer.
+
+## Establish the content and template contracts
+
+Read the whole supplied paper or source, including limitations and figure captions. Inventory the actual starting deck when present. Record audience, talk duration, total slide count including cover, fixed slide order, required content and editable objects. Preserve qualifiers, units, sample sizes, uncertainty, figure numbers and source precision. A rounded display value must retain its raw value in the evidence record. If a source statement contradicts a verifiable calculation, preserve the original input and document the correction with its derivation; do not silently repeat or overwrite the error. Do not infer data from labels or manufacture missing chart values.
+
+Run `python template_audit.py inspect TEMPLATE.pptx > /app/work/template.json`. Inspect the starting deck separately. Render template example slides when they exist. For a zero-slide template, create a disposable layout contact deck. Select layouts by master, part name, placeholder type and index, not a hard-coded numeric position or English name. Inspect geometry and typography in the layout/master XML where inherited values are absent from the slide API. Account for multi-master templates and notes masters separately.
+
+Write one page plan before editing. Each entry needs the scientific purpose, source locations, intended title, layout part, content slots, notes, duration estimate and uncertainty. Map actual source content to available slots. This is not a mandate to use a fixed number of pages or a fixed narrative sequence. Budget the specified total count before adding covers or backups.
+
+## Preserve the native document
+
+Choose the editing path that matches the input.
+
+For a one-to-one migration of editable text placeholders/text boxes and native charts with embedded XLSX workbooks, run the included `migrate.py` before writing a case-specific adapter. Supply a reviewed JSON map from source shape IDs to destination placeholder indices and exact layout parts. It uses the target template file, preserves chart XML and workbook content, binds the new frame to the actual slot, and copies speaker-note body paragraphs. Each map entry carries a locator back to the source. The command and plan format are in `example.md`. Inspect each slide's links, animations, diagram objects, alt text, theme-dependent chart colors, master graphics and non-body notes beforehand. This path covers slide content and notes text only. Choose an explicit custom path when these other objects, cropped images, tables, groups, or source-specific styling carry information. If an input is outside the helper's scope, preserve it through the documented editing workflow below and report any remaining gaps.
+
+- If the starting deck already uses the required template, edit supported objects in place. Assign `run.text` when retaining mixed text formatting; replacing `text_frame.text` destroys existing runs. Preserve charts, equations, artwork and notes not targeted by the task.
+- For a new deck or an allowed migration, open the supplied template with `Presentation(template_path)` and add slides from its layouts. Remove template example slides only in the output copy and only if the task calls for their replacement. Recreate supported source text, tables and charts as native objects. Reconcile all source slides against the output. Unsupported embedded objects are an explicit partial result, not permission to silently omit them.
+- Do not rebuild a template from its colors on a blank presentation. A slide must really link to the original layout, master and theme. Copying arbitrary slide XML between packages requires relationship, media, chart workbook and ID remapping. Do not use a shallow XML copy. Independently editable duplicated charts require independent chart parts and workbooks.
+
+Prefer the supplied placeholders. Keep inherited theme fonts/colors and default sizes unless adaptation needs a documented override. Preserve equations and scientific symbols. If removing inherited bullets for plain paragraphs, reset their hanging indent too; removing the glyph alone leaves wrapped lines indented. When no suitable placeholder exists, use measured native text/graphic containers within the template's content area and log the missing placeholder, chosen coordinates and reason. Never invent a fallback layout number.
+
+Keep figures proportional. `insert_picture` on a picture placeholder can crop to fill. For scientific panels use contain sizing: `scale=min(slot_w/image_w,slot_h/image_h)` and center the whole image in the slot. Crop only when the task allows it and no labels, scale bars, legends or evidence are removed. Keep source IDs beside figures and in notes. For a native chart retain axis units, limits, category order, series labels and editable workbook data. Never digitize an image into exact values without disclosing the inference. If only a figure image is supplied, preserve it and state that its underlying data are unavailable.
+
+Do not solve overflow by shrinking everything. Shorten presentation prose without dropping scientific qualifiers, move detail to notes if allowed, or choose another permitted layout. Respect the fixed slide count. Keep template size tiers; when fallback geometry is needed, choose a readable local tier and disclose it. Check all pages, including later slides and references.
+
+## Fonts, export and verification
+
+Discover installed font families using the provided environment tools, `fc-list`, or the host font inventory. Compare Latin, East Asian and symbol fonts. If a required font is absent, use a user-approved or reasonable available substitute only if permitted, explicitly record requested and selected families, then render again. A font family declared in PPTX is not proof of what the renderer used. Extract observed PDF font names separately. Keep the input theme unchanged if explicit run overrides are sufficient. Do not claim pixel identity across Office applications.
+
+Save an early editable deck and honest partial `result.json`. Reserve roughly the final fifth of the 900-second budget for rendering and review. Invoke the available office renderer without downloading dependencies or starting services unless the task authorizes that action. A typical local command is `soffice -env:UserInstallation=file:///app/work/lo-profile --headless --convert-to pdf --outdir /app/output /app/output/presentation.pptx`. Use a fresh output directory or verify freshness by hash and page count. Missing renderer means `partial`, never a renamed or hand-drawn fake PDF.
+
+Run `python template_audit.py check TEMPLATE.pptx OUTPUT.pptx > /app/work/package-check.json`. This checks relationships, exact original master/layout/theme parts, page bounds, placeholder lineage and native objects. Review every finding. Any intentional master or theme change needs a part-level reason and a fresh visual review; do not hide it by weakening checks. This tool is not a complete OOXML schema validator or a text-overflow detector. Supplement it with the environment's package validator if available.
+
+Render every saved output page to PNG using the real PDF. Inspect titles, long labels, scientific notation, table cells, chart legends, clipping, missing art, footer collisions and whitespace. Extract rendered text and compare significant numbers, qualifiers and source references with the page plan. Reopen the saved PPTX; check notes, chart cached values and embedded workbook values against the source. If available, open in the target Office application. Otherwise name the application actually used. A successful PDF export does not prove PowerPoint compatibility or chart editability.
+
+## Deliver evidence and honest status
+
+Alongside the contract's files, retain the editable PPTX, actual PDF/PNG preview, page evidence mapping and changes. For each page record actual slide/shape IDs, source file and precise section/page/table/figure locator, layout/master/theme parts, native versus image objects, claims, notes, uncertainty and observed deviations. Record input/output hashes, source and renderer versions, declared/available/observed fonts and the inspected render filenames. Never report an unperformed rehearsal, human review, benchmark gain or formal score.
+
+Distinguish `missing_input`, `unsupported_object`, `render_failed`, `needs_review` and `complete_local` in your explanatory status; obey any enums mandated by the case. If a requirement is unverified, mark it partial and preserve usable files. Maintain all original output-contract keys rather than replacing them with this Skill's preferred schema.
+
+Runtime dependencies depend on the actual environment. The helper needs Python 3.10+ and python-pptx; authoring may use the provided equivalent native Office library. Local development verified python-pptx 1.0.2. Export requires an actual Office renderer. Do not assume the author's Windows paths exist in evaluation. See `example.md` for the small interface example and `sources.md` for provenance and scope.

@@ -18,3 +18,7 @@
 ## 早期作品
 
 [AI 论文阅读实践 v1.0](https://github.com/tjyyy3/ai-paper-reading-lab/releases/tag/v1.0) 记录了对 *Lost in the Middle* 的四组阅读对照和原文核查。
+
+## 产品周赛第四期
+
+[学术 PPT 模板与格式适配](period-4/ppt-710fbc72/) 提供原生文本和图表的模板迁移工具。在本地三页合成案例中，重新打开演示稿后仍能找到目标版式的图表占位符，编辑标题、备注和图表数值并保存。
