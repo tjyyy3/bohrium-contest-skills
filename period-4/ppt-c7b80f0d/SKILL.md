@@ -7,7 +7,7 @@ description: Turn supplied papers or research materials into an editable academi
 
 Build a talk whose slide claims follow the supplied research evidence. Keep the editable deck, evidence map, notes, and rendered previews consistent. This skill organizes existing research into a presentation. It does not supply missing scientific findings or redesign research figures.
 
-For a manual invocation, see the [minimal calling example](references/invocation-example.md). For PDF-to-template jobs, follow the [executable runbook](references/runbook.md). It locates originals by physical page and region, populates inspected template layouts, and checks a real render against the editable file. A worked input fragment and all four CLI calls are included.
+For a manual invocation, see the [minimal calling example](references/invocation-example.md). For PDF-to-template jobs, follow the [executable runbook](references/runbook.md). It locates originals by physical page and region, populates inspected template layouts, and checks a real render against the editable file. A worked input fragment and the CLI commands are included.
 
 After reading the case and before laying out slides, use [academic slide design](references/academic-design.md). It includes a materials-science profile for experimental comparisons. Select that profile from the actual methods and evidence in the sources. Choose equivalent evidence forms for other disciplines.
 

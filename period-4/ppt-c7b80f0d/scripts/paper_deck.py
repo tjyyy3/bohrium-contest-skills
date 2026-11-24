@@ -4,6 +4,12 @@ import hashlib
 import io
 import json
 import math
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from decimal import Decimal
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 from pathlib import Path
@@ -15,6 +21,8 @@ from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION
 from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.enum.text import MSO_ANCHOR
 from pptx.util import Pt
+
+LUX_PER_UNIT = {"lx": Decimal(1), "lux": Decimal(1), "klx": Decimal(1000), "mlx": Decimal("0.001")}
 
 def read(path):
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
@@ -149,6 +157,91 @@ def add_table(slide, box, spec):
             if "pt" in spec:
                 cell.text_frame.paragraphs[0].font.size = Pt(spec["pt"])
 
+def verify_source_grid(obj, anchors, documents):
+    """Read each cell at the intersection of an anchored row and headed column."""
+    g = obj.get("source_grid")
+    if obj["kind"] == "table" and not g and not any(
+        re.search(r"\d", str(cell)) for row in obj["rows"][1:] for cell in row[1:]
+    ):
+        return
+    if not g:
+        raise ValueError("A native chart/table requires a source_grid.")
+    def source(ref):
+        if ref not in obj["refs"]:
+            raise ValueError(f"Uncited source grid anchor: {ref}")
+        a = anchors[ref]
+        return a, documents[a["pdf"]][a["page"]-1]
+    header, page = source(g["header"])
+    unit, unit_page = source(g["unit_ref"])
+    unit_text = unit_page.get_textbox(fitz.Rect(unit["quote_rect"]))
+    if not re.search(r"(?<!\w)" + re.escape(g["unit"]) + r"(?!\w)", unit_text):
+        raise ValueError("Unit missing from the scoped source caption.")
+    if (unit["pdf"], unit["page"]) != (header["pdf"], header["page"]):
+        raise ValueError("Grid header and unit caption must identify the same table page.")
+    is_chart = obj["kind"] == "chart"
+    output_unit = g.get("output_unit", g["unit"])
+    if output_unit == g["unit"]:
+        factor = Decimal(1)
+    elif g["unit"] in LUX_PER_UNIT and output_unit in LUX_PER_UNIT:
+        factor = LUX_PER_UNIT[g["unit"]] / LUX_PER_UNIT[output_unit]
+    else:
+        raise ValueError(f"Unsupported unit conversion: {g['unit']} to {output_unit}.")
+    if is_chart and not (obj["unit"] == output_unit or obj["unit"].endswith("(" + output_unit + ")")):
+        raise ValueError("Chart axis unit differs from the bound output unit.")
+    labels = obj["categories"] if is_chart else [row[0] for row in obj["rows"][1:]]
+    columns = list(obj["series"]) if is_chart else obj["rows"][0][1:]
+    if not is_chart and output_unit != g["unit"] and any(not str(c).endswith(f"({output_unit})") for c in columns):
+        raise ValueError("Converted table columns must show the output unit in their headers.")
+    if labels != [r["label"] for r in g["rows"]] or columns != [c["label"] for c in g["columns"]]:
+        raise ValueError("Output row or series labels differ from source bindings.")
+    def intersect_text(row_rect, x):
+        rect = fitz.Rect(x[0], row_rect[1], x[1], row_rect[3])
+        if not x[0] < x[1] or x[0] < row_rect[0] or x[1] > row_rect[2]:
+            raise ValueError("Grid column must lie inside its anchor.")
+        return " ".join(page.get_textbox(rect).split())
+    for col in g["columns"]:
+        if intersect_text(header["quote_rect"], col["x"]) != col["source_label"]:
+            raise ValueError(f"Source column header mismatch: {col['source_label']}")
+    for i, row in enumerate(g["rows"]):
+        anchor, _ = source(row["ref"])
+        if (anchor["pdf"], anchor["page"]) != (header["pdf"], header["page"]):
+            raise ValueError("Grid row and header are on different source pages.")
+        row_rect = anchor["quote_rect"]
+        if intersect_text(row_rect, g["label_x"]) != row["source_label"]:
+            raise ValueError(f"Source row label mismatch: {row['source_label']}")
+        for j, col in enumerate(g["columns"]):
+            cell = intersect_text(row_rect, col["x"]).replace("−", "-")
+            reported = obj["series"][col["label"]][i] if is_chart else obj["rows"][i+1][j+1]
+            expected = Decimal(cell) * factor
+            if expected != Decimal(str(reported)):
+                expected_output = f", expected {expected} {output_unit}" if output_unit != g["unit"] else ""
+                raise ValueError(f"Source cell {row['source_label']} / {col['source_label']}: {cell} {g['unit']}, output {reported}{expected_output}.")
+
+def render(deck_file, preview):
+    office = os.environ.get("PAPER_DECK_SOFFICE") or shutil.which("soffice") or shutil.which("libreoffice")
+    if not office:
+        raise ValueError("Set PAPER_DECK_SOFFICE to the LibreOffice executable.")
+    deck = Path(deck_file).resolve()
+    target = Path(preview).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.suffix.lower() != ".pdf":
+        raise ValueError("Use a PDF preview filename.")
+    # LibreOffice creates deep extension registries. On Windows use long paths
+    # for tempfile cleanup and ordinary file URIs for the renderer.
+    parent = str(target.parent)
+    win_prefix = chr(92) * 2 + "?" + chr(92)
+    if os.name == "nt" and not parent.startswith(chr(92)):
+        parent = win_prefix + parent
+    with tempfile.TemporaryDirectory(dir=parent) as tmp:
+        work = Path(tmp.removeprefix(win_prefix))
+        subprocess.run([office, "-env:UserInstallation=" + (work/"profile").as_uri(), "--headless", "--norestore",
+                        "--convert-to", "pdf:impress_pdf_Export", "--outdir", str(work), str(deck)],
+                       check=True, capture_output=True, timeout=170, env=dict(os.environ, SAL_DISABLE_OPENCL="1"))
+        with fitz.open(work/(deck.stem+".pdf")) as pdf:
+            pdf.set_metadata({**pdf.metadata, "keywords":"paper-deck-sha256=" + sha(deck)})
+            pdf.save(work/"checked-preview.tmp")
+        os.replace(work/"checked-preview.tmp", target)
+
 def build(plan_file, deck_file, map_file):
     plan = read(plan_file)
     base = Path(plan_file).resolve().parent
@@ -167,7 +260,7 @@ def build(plan_file, deck_file, map_file):
         documents[key] = fitz.open(path)
         if documents[key].needs_pass:
             raise ValueError(f"Encrypted PDF: {path.name}")
-        sources[key] = {"file": path.name, "sha256": sha(path), "pages": len(documents[key])}
+        sources[key] = {"file": path.name, "path": os.path.relpath(path, Path(map_file).resolve().parent), "sha256": sha(path), "pages": len(documents[key])}
     def page_for(anchor):
         n = anchor["page"]
         doc = documents[anchor["pdf"]]
@@ -196,6 +289,8 @@ def build(plan_file, deck_file, map_file):
             slot = slide.placeholders[item["slot"]]
             box = frame(slot, item.get("box",[0,0,1,1]))
             kind = item["kind"]
+            if kind in ("chart", "table"):
+                verify_source_grid(item, anchors, documents)
             if kind == "text":
                 add_text(slide, slot, box, item)
             elif kind == "table":
@@ -258,6 +353,28 @@ def check(deck_file, map_file, preview, directory):
         raise ValueError("Deck and evidence map hashes differ.")
     deck = Presentation(deck_file)
     report = []
+    for key, details in receipt["sources"].items():
+        path = Path(map_file).resolve().parent / details["path"]
+        if sha(path) != details["sha256"]:
+            raise ValueError(f"Source PDF hash mismatch: {key}")
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        docs = {k:stack.enter_context(fitz.open(Path(map_file).resolve().parent/v["path"])) for k,v in receipt["sources"].items()}
+        for entry in receipt["slides"]:
+            for obj in entry["objects"]:
+                if obj["kind"] in ("chart", "table"):
+                    verify_source_grid(obj, entry["evidence"], docs)
+    with fitz.open(preview) as supplied:
+        if supplied.metadata.get("keywords") != "paper-deck-sha256=" + sha(deck_file):
+            raise ValueError("Preview was not rendered from this PPTX. Use the render command.")
+        with tempfile.TemporaryDirectory(dir=dest) as tmp:
+            fresh = Path(tmp)/"reference.pdf"
+            render(deck_file, fresh)
+            with fitz.open(fresh) as reference:
+                if len(supplied) != len(reference) or any(
+                    a.rect != b.rect or a.get_pixmap(dpi=125).digest != b.get_pixmap(dpi=125).digest
+                    for a,b in zip(supplied, reference)):
+                    raise ValueError("Preview differs from independent rendering of this PPTX.")
     with fitz.open(preview) as pdf:
         if len(pdf) != len(deck.slides) or len(pdf) != len(receipt["slides"]):
             raise ValueError("Evidence/deck/preview slide counts differ.")
@@ -299,7 +416,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd",required=True)
     for fn, args in [(index,["pdf","directory"]),(layouts,["template","output"]),
-                     (build,["plan_file","deck_file","map_file"]),(check,["deck_file","map_file","preview","directory"])]:
+                     (build,["plan_file","deck_file","map_file"]),(render,["deck_file","preview"]),(check,["deck_file","map_file","preview","directory"])]:
         p = sub.add_parser(fn.__name__)
         for key in args:
             p.add_argument(key)
