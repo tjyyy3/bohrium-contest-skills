@@ -22,6 +22,28 @@ NS = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main",
       "c": "http://schemas.openxmlformats.org/drawingml/2006/chart"}
 
 
+def slide_background(xml, rels, archive):
+    bg = ET.fromstring(xml).find("p:cSld/p:bg", NS)
+    if bg is None:
+        return None
+    images = []
+    issues = []
+    by_id = {rel["id"]: rel for rel in rels}
+    for node in bg.iter():
+        for key, rid in list(node.attrib.items()):
+            if not key.startswith("{" + NS["r"] + "}"):
+                continue
+            rel = by_id.get(rid)
+            if key != "{" + NS["r"] + "}embed" or not rel or rel["external"] or rel["type"] != "image" or rel["target"] not in archive.namelist():
+                issues.append({"id": rid, "relationship": rel})
+                continue
+            digest = hashlib.sha256(archive.read(rel["target"])).hexdigest()
+            images.append({"id": rid, "part": rel["target"], "sha256": digest})
+            node.set(key, digest)
+    canonical = ET.canonicalize(ET.tostring(bg, encoding="unicode"), strip_text=True, rewrite_prefixes=True)
+    return {"signature": hashlib.sha256(canonical.encode()).hexdigest(), "images": images, "issues": issues}
+
+
 def inventory(path):
     prs = Presentation(path)
     with zipfile.ZipFile(path) as archive:
@@ -79,6 +101,7 @@ def inventory(path):
                     rows.append(row)
             notes_frame = slide.notes_slide.notes_text_frame if slide.has_notes_slide else None
             slides.append({"slide": index, "part": part, "layout": str(layout.part.partname).lstrip("/"), "master": master_part,
+                           "background": slide_background(archive.read(part), relationships.get(part, []), archive),
                            "shown_in_normal_sequence": slide._element.get("show") not in ("0", "false"),
                            "theme": theme, "shapes": shapes,
                            "notes": notes_frame.text if notes_frame is not None else "",
@@ -103,6 +126,17 @@ def compare_migration(start, actual, plan):
     for page, output in zip(plan["slides"], actual["slides"]):
         original = source[page["source_slide"] - 1]
         ref = {"source_slide": original["slide"], "output_slide": output["slide"]}
+        policy = page.get("background", "preserve")
+        reason = page.get("background_reason")
+        if policy not in {"preserve", "template"} or (policy == "template" and (not isinstance(reason, str) or not reason.strip())):
+            raise ValueError("invalid slide background policy or missing decoration rationale")
+        expected = original["background"] if policy == "preserve" else None
+        actual_background = output["background"]
+        if expected and expected["issues"]:
+            findings.append({"kind": "unresolved_source_background", **ref})
+        if (expected or {}).get("signature") != (actual_background or {}).get("signature"):
+            findings.append({"kind": "slide_background_changed", **ref,
+                             "expected": expected, "actual": actual_background})
         if original["shown_in_normal_sequence"] != output["shown_in_normal_sequence"]:
             findings.append({"kind": "slide_visibility_changed", **ref,
                              "expected_shown": original["shown_in_normal_sequence"],
@@ -146,6 +180,9 @@ def main():
         findings.append({"kind": "canvas_changed"})
     original_layouts = {layout["part"]: layout for layout in original["layouts"]}
     for slide in actual["slides"]:
+        if slide["background"] and slide["background"]["issues"]:
+            findings.append({"kind": "unresolved_background_relationship", "slide": slide["slide"],
+                             "issues": slide["background"]["issues"]})
         if slide["layout"] not in original_layouts:
             findings.append({"kind": "foreign_layout", "slide": slide["slide"], "part": slide["layout"]})
         else:

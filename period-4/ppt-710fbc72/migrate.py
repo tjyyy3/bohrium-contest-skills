@@ -2,6 +2,7 @@
 import argparse
 from copy import deepcopy
 import hashlib
+from io import BytesIO
 import json
 from pathlib import Path
 import sys
@@ -65,6 +66,42 @@ def native_chart(shape, slot, slide):
     slot._element.getparent().replace(slot._element, frame)
 
 
+def migrate_background(src, dst, page, same_aspect):
+    bg = src._element.cSld.find(qn("p:bg"))
+    policy = page.get("background", "preserve")
+    if policy == "template":
+        reason = page.get("background_reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("template background requires a reviewed background_reason")
+        return {"action": "template", "reason": reason}
+    if policy != "preserve":
+        raise ValueError("background must be preserve or template")
+    if bg is None:
+        return {"action": "inherit_destination_layout"}
+    blips = bg.xpath("./p:bgPr/a:blipFill/a:blip")
+    if len(blips) != 1 or not same_aspect:
+        raise ValueError("unsupported slide background or changed aspect ratio; adapt the scientific artwork manually, or select template for reviewed decoration")
+    if bg.xpath(".//a:schemeClr | .//a:tile"):
+        raise ValueError("theme-dependent or tiled scientific background needs manual adaptation")
+    blip = blips[0]
+    rid = blip.get(qn("r:embed"))
+    rel_attrs = [(node, key) for node in bg.iter() for key in node.attrib
+                 if key.startswith("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}")]
+    if rel_attrs != [(blip, qn("r:embed"))] or rid not in src.part.rels:
+        raise ValueError("background needs one resolved embedded image; linked or compound artwork needs manual adaptation")
+    rel = src.part.rels[rid]
+    if rel.is_external or rel.reltype != RT.IMAGE:
+        raise ValueError("background relationship must target an internal image")
+    image = rel.target_part
+    if image.content_type not in {"image/png", "image/jpeg", "image/gif", "image/tiff", "image/bmp"} or image.rels:
+        raise ValueError("unsupported background image format or dependent image part")
+    _, out_id = dst.part.get_or_add_image_part(BytesIO(image.blob))
+    copied = deepcopy(bg)
+    copied.xpath("./p:bgPr/a:blipFill/a:blip")[0].set(qn("r:embed"), out_id)
+    dst._element.cSld.insert(0, copied)
+    return {"action": "preserved_image", "sha256": hashlib.sha256(image.blob).hexdigest()}
+
+
 def migrate(args):
     inputs = [args.start, args.template, args.plan]
     if len({p.resolve() for p in [*inputs, args.deck, args.map]}) != 5:
@@ -85,6 +122,8 @@ def migrate(args):
     for page_no, page in enumerate(pages, 1):
         src = source.slides[page["source_slide"] - 1]
         slide = out.slides.add_slide(layouts[page["layout"].lstrip("/")])
+        background = migrate_background(src, slide, page, source.slide_width * out.slide_height ==
+                                        out.slide_width * source.slide_height)
         show = src._element.get("show")
         if show is not None:
             slide._element.set("show", show)
@@ -121,6 +160,7 @@ def migrate(args):
                 raise ValueError(f"slide {page_no}: target has no notes body")
             paragraphs(notes, destination, False)
         records.append({"output_slide": page_no, "source_slide": page["source_slide"],
+                        "background": background,
                         "shown_in_normal_sequence": show not in ("0", "false"),
                         "layout": page["layout"], "slots": mapped, "notes_body_copied": notes is not None})
     args.deck.parent.mkdir(parents=True, exist_ok=True)

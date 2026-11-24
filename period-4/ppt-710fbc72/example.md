@@ -17,6 +17,8 @@ Inspect each actual file, then write a plan such as this illustrative record. Va
 
 Run the helper from its installed folder.
 
+A page with no `background` option keeps its supported slide-local embedded image. To restore destination branding on a verified decorative page, add `"background": "template", "background_reason": "The source image is the retired institutional wallpaper; this page contains no evidence in its background."` to the page object. Do this only after inspecting that page.
+
 ```sh
 python template_audit.py inspect /input/template.pptx > /app/work/template.json
 python template_audit.py inspect /input/start.pptx > /app/work/start.json
